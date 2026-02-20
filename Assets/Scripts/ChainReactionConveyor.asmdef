@@ -1,0 +1,16 @@
+{
+    "name": "ChainReactionConveyor",
+    "rootNamespace": "ChainReactionConveyor",
+    "references": [
+        "UnityEngine.TestTools"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

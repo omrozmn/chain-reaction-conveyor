@@ -10,16 +10,16 @@
 
 ### 0.1 Repository Setup
 
-- [ ] Unity 2D URP proje oluştur
-- [ ] iOS + Android build support
-- [ ] Git repo + branch stratejisi
-- [ ] Core / Mechanic klasör ayrımı
-- [ ] GlobalConfig sistemi oluştur
+- [x] Unity 2D URP proje oluştur
+- [x] iOS + Android build support
+- [x] Git repo + branch stratejisi
+- [x] Core / Mechanic klasör ayrımı
+- [x] GlobalConfig sistemi oluştur
 
 ### 0.2 Architecture Skeleton
 
-- [ ] AppState enum
-- [ ] GameFlowController
+- [x] AppState enum
+- [x] GameFlowController
 - [ ] ServiceLocator / DI container
 - [ ] EventBus sistemi
 - [ ] ConfigLoader
@@ -32,19 +32,19 @@
 
 ### 1.1 Level System
 
-- [ ] LevelDef model oluştur
-- [ ] DifficultyProfile modeli
-- [ ] LevelLoader (JSON + ScriptableObject)
-- [ ] Seed sistemi
-- [ ] Deterministic random wrapper
+- [x] LevelDef model oluştur
+- [x] DifficultyProfile modeli
+- [x] LevelLoader (JSON + ScriptableObject)
+- [x] Seed sistemi
+- [x] Deterministic random wrapper
 
 ### 1.2 Mechanic Base Layer
 
-- [ ] IMechanic interface
-- [ ] ConveyorMechanic implementasyonu
-- [ ] Board grid sistemi
-- [ ] ChainResolver
-- [ ] SpawnController
+- [x] IMechanic interface
+- [x] ConveyorMechanic implementasyonu
+- [x] Board grid sistemi
+- [x] ChainResolver
+- [x] SpawnController
 
 ### 1.3 Determinism Layer
 
@@ -262,10 +262,10 @@
 
 | Milestone | Açıklama |
 |-----------|----------|
-| M0        | Core engine skeleton - çalışır ama boş |
-| M1        | 30 level + retention layer aktif |
-| M2        | 120 level + soft launch tuning |
-| M3        | 300 level + full automation |
+| M0        | Core engine skeleton - çalışır ama boş | ✅ COMPLETED |
+| M1        | 30 level + retention layer aktif | |
+| M2        | 120 level + soft launch tuning | |
+| M3        | 300 level + full automation | |
 
 ---
 
