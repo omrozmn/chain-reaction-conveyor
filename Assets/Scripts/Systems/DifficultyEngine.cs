@@ -13,9 +13,14 @@ namespace ChainReactionConveyor.Systems
 
         [Header("Configuration")]
         [SerializeField] private int windowSize = 10;           // Games to track for win rate
-        [SerializeField] private int spikeThreshold = 3;       // Consecutive failures to trigger spike
-        [SerializeField] private int recoveryThreshold = 3;    // Consecutive wins to trigger recovery
-        [SerializeField] private float difficultyStep = 0.1f;  // How much to adjust per step
+        [SerializeField] private int spikeThreshold = 3;          // Consecutive failures to trigger spike
+        [SerializeField] private int recoveryThreshold = 3;     // Consecutive wins to trigger recovery
+        [SerializeField] private float difficultyStep = 0.1f;   // How much to adjust per step
+
+        [Header("Base Difficulty - NEW PLAYERS")]
+        [SerializeField] private float baseDifficulty = 0.4f;    // FIXED: 0.3-0.5 range for new players (was 1.0f)
+        [SerializeField] private float minDifficulty = 0.3f;     // Minimum floor
+        [SerializeField] private float maxDifficulty = 2.0f;     // Maximum ceiling
 
         [Header("Current State (Read-Only)")]
         [SerializeField] private float currentWinRate = 0.5f;
@@ -23,9 +28,10 @@ namespace ChainReactionConveyor.Systems
         [SerializeField] private int consecutiveWins = 0;
         [SerializeField] private bool isSpikeDetected = false;
         [SerializeField] private bool isRecovering = false;
-        [SerializeField] private float currentDifficulty = 1.0f;
+        [SerializeField] private float currentDifficulty = 0.4f;  // FIXED: Start at baseDifficulty
 
         private Queue<bool> recentResults = new Queue<bool>();
+        private bool isInitialized = false;
 
         public event Action<float> OnDifficultyChanged;
         public event Action<bool> OnSpikeDetected;     // true = spike, false = recovered
@@ -34,6 +40,7 @@ namespace ChainReactionConveyor.Systems
         public bool IsSpikeDetected => isSpikeDetected;
         public bool IsRecovering => isRecovering;
         public float CurrentDifficulty => currentDifficulty;
+        public float BaseDifficulty => baseDifficulty;
 
         private void Awake()
         {
@@ -43,6 +50,14 @@ namespace ChainReactionConveyor.Systems
                 return;
             }
             Instance = this;
+        }
+
+        private void Start()
+        {
+            // Initialize with base difficulty for new players
+            currentDifficulty = baseDifficulty;
+            isInitialized = true;
+            Debug.Log($"[DifficultyEngine] Initialized with base difficulty: {baseDifficulty}");
         }
 
         /// <summary>
@@ -124,11 +139,11 @@ namespace ChainReactionConveyor.Systems
             {
                 isRecovering = false;
                 
-                if (currentWinRate > 0.7f && currentDifficulty < 2.0f)
+                if (currentWinRate > 0.7f && currentDifficulty < maxDifficulty)
                 {
                     AdjustDifficulty(difficultyStep * 0.5f);  // Slight increase
                 }
-                else if (currentWinRate < 0.3f && currentDifficulty > 0.3f)
+                else if (currentWinRate < 0.3f && currentDifficulty > minDifficulty)
                 {
                     AdjustDifficulty(-difficultyStep * 0.5f); // Slight decrease
                 }
@@ -137,8 +152,45 @@ namespace ChainReactionConveyor.Systems
 
         private void AdjustDifficulty(float delta)
         {
-            currentDifficulty = Mathf.Clamp(currentDifficulty + delta, 0.3f, 2.0f);
+            currentDifficulty = Mathf.Clamp(currentDifficulty + delta, minDifficulty, maxDifficulty);
             OnDifficultyChanged?.Invoke(currentDifficulty);
+        }
+
+        /// <summary>
+        /// Apply difficulty from LevelDef - used for monetization anchors
+        /// </summary>
+        public void ApplyLevelDefDifficulty(Models.LevelDef levelDef)
+        {
+            if (levelDef == null) return;
+
+            // Apply monetization anchor - easier levels for monetization
+            if (levelDef.monetizationAnchor)
+            {
+                currentDifficulty = Mathf.Min(currentDifficulty, baseDifficulty);
+                Debug.Log($"[DifficultyEngine] Monetization anchor applied: difficulty set to {currentDifficulty}");
+            }
+
+            // Apply spike/recovery flags from LevelDef
+            if (levelDef.isSpike)
+            {
+                isSpikeDetected = true;
+                OnSpikeDetected?.Invoke(true);
+            }
+            
+            if (levelDef.isRecovery)
+            {
+                isRecovering = true;
+            }
+
+            // Apply target win rate from LevelDef
+            if (levelDef.targetWinRate > 0)
+            {
+                // Adjust difficulty toward target win rate
+                float targetDifficulty = levelDef.targetWinRate * 2f; // 0.3 -> 0.6, 0.7 -> 1.4
+                currentDifficulty = Mathf.Clamp(targetDifficulty, minDifficulty, maxDifficulty);
+                OnDifficultyChanged?.Invoke(currentDifficulty);
+                Debug.Log($"[DifficultyEngine] Level target win rate {levelDef.targetWinRate} applied, difficulty: {currentDifficulty}");
+            }
         }
 
         /// <summary>
@@ -152,7 +204,7 @@ namespace ChainReactionConveyor.Systems
             consecutiveWins = 0;
             isSpikeDetected = false;
             isRecovering = false;
-            currentDifficulty = 1.0f;
+            currentDifficulty = baseDifficulty;  // FIXED: Reset to baseDifficulty instead of 1.0f
         }
 
         /// <summary>
@@ -161,6 +213,19 @@ namespace ChainReactionConveyor.Systems
         public float GetDifficultyMultiplier()
         {
             return currentDifficulty;
+        }
+
+        /// <summary>
+        /// Set base difficulty for new players (can be adjusted based on player history)
+        /// </summary>
+        public void SetBaseDifficulty(float baseDiff)
+        {
+            baseDifficulty = Mathf.Clamp(baseDiff, 0.3f, 0.5f);  // Enforce 0.3-0.5 range
+            if (!isInitialized)
+            {
+                currentDifficulty = baseDifficulty;
+            }
+            Debug.Log($"[DifficultyEngine] Base difficulty set to: {baseDifficulty}");
         }
     }
 }

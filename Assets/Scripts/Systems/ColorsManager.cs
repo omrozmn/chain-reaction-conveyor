@@ -1,6 +1,7 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
+using ChainReactionConveyor.Services;
 
 namespace ChainReactionConveyor.Systems
 {
@@ -37,9 +38,19 @@ namespace ChainReactionConveyor.Systems
     }
 
     /// <summary>
-    /// Manages all color themes in the game
+    /// Event data for theme changes
     /// </summary>
-    public class ColorsManager : MonoBehaviour
+    public class ThemeChangedEvent
+    {
+        public ColorTheme Theme { get; set; }
+        public int ThemeIndex { get; set; }
+    }
+
+    /// <summary>
+    /// Manages all color themes in the game
+    /// Uses IComponent pattern for Unity integration
+    /// </summary>
+    public class ColorsManager : MonoBehaviour, IEventSubscriber
     {
         public static ColorsManager Instance { get; private set; }
 
@@ -47,11 +58,32 @@ namespace ChainReactionConveyor.Systems
         [SerializeField] private ColorTheme[] availableThemes;
         [SerializeField] private int currentThemeIndex = 0;
 
+        [Header("Settings")]
+        [SerializeField] private bool applyOnStart = true;
+        [SerializeField] private bool persistTheme = true;
+
         // Current theme
         public ColorTheme CurrentTheme { get; private set; }
 
+        #region IEventSubscriber
+
+        public void Subscribe()
+        {
+            EventBus.Instance.Subscribe<LevelStartEvent>(OnLevelStart);
+            EventBus.Instance.Subscribe<LevelCompleteEvent>(OnLevelComplete);
+        }
+
+        public void Unsubscribe()
+        {
+            EventBus.Instance.Clear<LevelStartEvent>();
+            EventBus.Instance.Clear<LevelCompleteEvent>();
+        }
+
+        #endregion
+
         // Events
         public event Action<ColorTheme> OnThemeChanged;
+        public event Action OnThemeApplied;
 
         private void Awake()
         {
@@ -64,6 +96,38 @@ namespace ChainReactionConveyor.Systems
             DontDestroyOnLoad(gameObject);
 
             LoadTheme(currentThemeIndex);
+        }
+
+        private void OnEnable()
+        {
+            Subscribe();
+        }
+
+        private void OnDisable()
+        {
+            Unsubscribe();
+        }
+
+        private void Start()
+        {
+            if (applyOnStart)
+            {
+                ApplyThemeToUI();
+            }
+        }
+
+        private void OnLevelStart(LevelStartEvent evt)
+        {
+            // Optionally reset theme or apply on level start
+            if (applyOnStart)
+            {
+                ApplyThemeToUI();
+            }
+        }
+
+        private void OnLevelComplete(LevelCompleteEvent evt)
+        {
+            // Could apply success/fail theme colors here
         }
 
         /// <summary>
@@ -82,8 +146,23 @@ namespace ChainReactionConveyor.Systems
             CurrentTheme = availableThemes[index];
             currentThemeIndex = index;
 
+            // Persist preference
+            if (persistTheme)
+            {
+                PlayerPrefs.SetInt("SelectedTheme", index);
+            }
+
             Debug.Log($"[ColorsManager] Loaded theme: {CurrentTheme.themeName}");
+            
+            // Fire local event
             OnThemeChanged?.Invoke(CurrentTheme);
+            
+            // Publish to EventBus
+            EventBus.Instance.Publish(new ThemeChangedEvent
+            {
+                Theme = CurrentTheme,
+                ThemeIndex = currentThemeIndex
+            });
         }
 
         /// <summary>
@@ -106,10 +185,22 @@ namespace ChainReactionConveyor.Systems
         }
 
         /// <summary>
+        /// Load persisted theme
+        /// </summary>
+        public void LoadPersistedTheme()
+        {
+            if (persistTheme && PlayerPrefs.HasKey("SelectedTheme"))
+            {
+                LoadTheme(PlayerPrefs.GetInt("SelectedTheme"));
+            }
+        }
+
+        /// <summary>
         /// Get next theme in list
         /// </summary>
         public void NextTheme()
         {
+            if (availableThemes == null || availableThemes.Length <= 1) return;
             int nextIndex = (currentThemeIndex + 1) % availableThemes.Length;
             LoadTheme(nextIndex);
         }
@@ -119,6 +210,7 @@ namespace ChainReactionConveyor.Systems
         /// </summary>
         public void PreviousTheme()
         {
+            if (availableThemes == null || availableThemes.Length <= 1) return;
             int prevIndex = (currentThemeIndex - 1 + availableThemes.Length) % availableThemes.Length;
             LoadTheme(prevIndex);
         }
@@ -131,14 +223,18 @@ namespace ChainReactionConveyor.Systems
             if (CurrentTheme == null) return;
 
             // Apply to Canvas
-            var canvases = FindObjectsOfType<UnityEngine.Canvas>();
+            var canvases = FindObjectsByType<UnityEngine.Canvas>(FindObjectsSortMode.None);
             foreach (var canvas in canvases)
             {
-                canvas.GetComponent<UnityEngine.UI.Image>().color = CurrentTheme.backgroundColor;
+                var image = canvas.GetComponent<UnityEngine.UI.Image>();
+                if (image != null)
+                {
+                    image.color = CurrentTheme.backgroundColor;
+                }
             }
 
-            // Apply to all UI Images and Text
-            var images = FindObjectsOfType<UnityEngine.UI.Image>();
+            // Apply to all UI Images and Text tagged as Themeable
+            var images = FindObjectsByType<UnityEngine.UI.Image>(FindObjectsSortMode.None);
             foreach (var image in images)
             {
                 if (image.CompareTag("Themeable"))
@@ -147,7 +243,7 @@ namespace ChainReactionConveyor.Systems
                 }
             }
 
-            var texts = FindObjectsOfType<UnityEngine.UI.Text>();
+            var texts = FindObjectsByType<UnityEngine.UI.Text>(FindObjectsSortMode.None);
             foreach (var text in texts)
             {
                 if (text.CompareTag("Themeable"))
@@ -157,6 +253,7 @@ namespace ChainReactionConveyor.Systems
             }
 
             Debug.Log("[ColorsManager] Theme applied to UI");
+            OnThemeApplied?.Invoke();
         }
 
         /// <summary>
@@ -235,5 +332,81 @@ namespace ChainReactionConveyor.Systems
         /// Get current theme index
         /// </summary>
         public int GetCurrentThemeIndex() => currentThemeIndex;
+
+        /// <summary>
+        /// Get color with alpha for UI elements
+        /// </summary>
+        public Color GetColorWithAlpha(Color color, float alpha)
+        {
+            Color c = color;
+            c.a = alpha;
+            return c;
+        }
+
+        /// <summary>
+        /// Get gradient between primary and secondary colors
+        /// </summary>
+        public Gradient GetPrimaryGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new GradientColorKey[] {
+                    new GradientColorKey(CurrentTheme.primaryColor, 0f),
+                    new GradientColorKey(CurrentTheme.secondaryColor, 1f)
+                },
+                new GradientAlphaKey[] {
+                    new GradientAlphaKey(1f, 0f),
+                    new GradientAlphaKey(1f, 1f)
+                }
+            );
+            return gradient;
+        }
+
+        /// <summary>
+        /// Get rainbow gradient for special effects
+        /// </summary>
+        public static Gradient GetRainbowGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new GradientColorKey[] {
+                    new GradientColorKey(Color.red, 0f),
+                    new GradientColorKey(Color.yellow, 0.25f),
+                    new GradientColorKey(Color.green, 0.5f),
+                    new GradientColorKey(Color.cyan, 0.75f),
+                    new GradientColorKey(Color.magenta, 1f)
+                },
+                new GradientAlphaKey[] {
+                    new GradientAlphaKey(1f, 0f),
+                    new GradientAlphaKey(1f, 1f)
+                }
+            );
+            return gradient;
+        }
+
+        /// <summary>
+        /// Add a new theme at runtime
+        /// </summary>
+        public void AddTheme(ColorTheme theme)
+        {
+            if (availableThemes == null)
+            {
+                availableThemes = new ColorTheme[] { theme };
+            }
+            else
+            {
+                Array.Resize(ref availableThemes, availableThemes.Length + 1);
+                availableThemes[availableThemes.Length - 1] = theme;
+            }
+        }
+
+        /// <summary>
+        /// Clear all themes
+        /// </summary>
+        public void ClearThemes()
+        {
+            availableThemes = null;
+            CurrentTheme = null;
+        }
     }
 }

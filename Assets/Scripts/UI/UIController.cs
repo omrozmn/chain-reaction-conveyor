@@ -3,13 +3,16 @@ using UnityEngine.UI;
 using UnityEngine.SceneManagement;
 using System;
 using System.Collections.Generic;
+using ChainReactionConveyor.Services;
+using ChainReactionConveyor.Systems;
 
 namespace ChainReactionConveyor.UI
 {
     /// <summary>
     /// Main UI Controller - manages all UI screens and elements
+    /// Uses IComponent pattern and EventBus for communication
     /// </summary>
-    public class UIController : MonoBehaviour
+    public class UIController : MonoBehaviour, IEventSubscriber
     {
         public static UIController Instance { get; private set; }
 
@@ -18,6 +21,7 @@ namespace ChainReactionConveyor.UI
         [SerializeField] private GameObject hudScreen;
         [SerializeField] private GameObject gameOverScreen;
         [SerializeField] private GameObject pauseScreen;
+        [SerializeField] private GameObject settingsScreen;
 
         [Header("HUD Elements")]
         [SerializeField] private Text scoreText;
@@ -40,6 +44,41 @@ namespace ChainReactionConveyor.UI
         [SerializeField] private Text bombCountText;
         [SerializeField] private Text slowCountText;
 
+        [Header("Settings UI")]
+        [SerializeField] private Button themeNextButton;
+        [SerializeField] private Button themePrevButton;
+        [SerializeField] private Text themeNameText;
+        [SerializeField] private Slider volumeSlider;
+        [SerializeField] private Toggle soundToggle;
+        [SerializeField] private Toggle vibrationToggle;
+
+        [Header("Theme Integration")]
+        [SerializeField] private bool applyThemeOnStart = true;
+
+        #region IEventSubscriber
+
+        public void Subscribe()
+        {
+            EventBus.Instance.Subscribe<LevelStartEvent>(OnLevelStart);
+            EventBus.Instance.Subscribe<LevelCompleteEvent>(OnLevelComplete);
+            EventBus.Instance.Subscribe<LevelFailEvent>(OnLevelFail);
+            EventBus.Instance.Subscribe<BoosterInventoryChangedEvent>(OnBoosterInventoryChanged);
+            EventBus.Instance.Subscribe<ThemeChangedEvent>(OnThemeChanged);
+            EventBus.Instance.Subscribe<ChainResolvedEvent>(OnChainResolved);
+        }
+
+        public void Unsubscribe()
+        {
+            EventBus.Instance.Clear<LevelStartEvent>();
+            EventBus.Instance.Clear<LevelCompleteEvent>();
+            EventBus.Instance.Clear<LevelFailEvent>();
+            EventBus.Instance.Clear<BoosterInventoryChangedEvent>();
+            EventBus.Instance.Clear<ThemeChangedEvent>();
+            EventBus.Instance.Clear<ChainResolvedEvent>();
+        }
+
+        #endregion
+
         // Screen states
         private enum ScreenState { MainMenu, HUD, GameOver, Paused }
         private ScreenState currentState = ScreenState.MainMenu;
@@ -51,8 +90,10 @@ namespace ChainReactionConveyor.UI
         public event Action OnPauseClicked;
         public event Action OnResumeClicked;
         public event Action<BoosterType> OnBoosterButtonClicked;
+        public event Action OnSettingsClicked;
 
         private bool isPaused = false;
+        private bool isSettingsOpen = false;
 
         private void Awake()
         {
@@ -65,11 +106,117 @@ namespace ChainReactionConveyor.UI
             DontDestroyOnLoad(gameObject);
             
             InitializeButtons();
+            SubscribeToThemeEvents();
+        }
+
+        private void OnEnable()
+        {
+            Subscribe();
+        }
+
+        private void OnDisable()
+        {
+            Unsubscribe();
+        }
+
+        private void SubscribeToThemeEvents()
+        {
+            if (ColorsManager.Instance != null)
+            {
+                ColorsManager.Instance.OnThemeChanged += OnThemeChangedHandler;
+            }
+        }
+
+        private void OnThemeChangedHandler(Systems.ColorTheme theme)
+        {
+            UpdateThemeDisplay();
+        }
+
+        private void UpdateThemeDisplay()
+        {
+            if (themeNameText != null && ColorsManager.Instance != null)
+            {
+                themeNameText.text = ColorsManager.Instance.CurrentTheme?.themeName ?? "Default";
+            }
         }
 
         private void Start()
         {
             ShowMainMenu();
+            
+            if (applyThemeOnStart && ColorsManager.Instance != null)
+            {
+                ColorsManager.Instance.ApplyThemeToUI();
+            }
+            
+            InitializeSettingsButtons();
+            UpdateThemeDisplay();
+        }
+
+        private void InitializeSettingsButtons()
+        {
+            if (themeNextButton != null)
+                themeNextButton.onClick.AddListener(() => {
+                    ColorsManager.Instance?.NextTheme();
+                    OnSettingsClicked?.Invoke();
+                });
+            
+            if (themePrevButton != null)
+                themePrevButton.onClick.AddListener(() => {
+                    ColorsManager.Instance?.PreviousTheme();
+                    OnSettingsClicked?.Invoke();
+                });
+            
+            if (volumeSlider != null)
+                volumeSlider.onValueChanged.AddListener(OnVolumeChanged);
+            
+            if (soundToggle != null)
+                soundToggle.onValueChanged.AddListener(OnSoundToggle);
+            
+            if (vibrationToggle != null)
+                vibrationToggle.onValueChanged.AddListener(OnVibrationToggle);
+        }
+
+        private void OnVolumeChanged(float value)
+        {
+            AudioListener.volume = value;
+        }
+
+        private void OnSoundToggle(bool enabled)
+        {
+            AudioListener.pause = !enabled;
+        }
+
+        private void OnVibrationToggle(bool enabled)
+        {
+            // Handheld.Vibrate() can be called when available
+            Debug.Log("[UIController] Vibration " + (enabled ? "enabled" : "disabled"));
+        }
+
+        public void OpenSettings()
+        {
+            if (settingsScreen != null)
+            {
+                settingsScreen.SetActive(true);
+                isSettingsOpen = true;
+            }
+        }
+
+        public void CloseSettings()
+        {
+            if (settingsScreen != null)
+            {
+                settingsScreen.SetActive(false);
+                isSettingsOpen = false;
+            }
+        }
+
+        public void ToggleSettings()
+        {
+            if (isSettingsOpen)
+                CloseSettings();
+            else
+                OpenSettings();
         }
 
         private void InitializeButtons()
@@ -90,6 +237,53 @@ namespace ChainReactionConveyor.UI
             if (slowButton != null)
                 slowButton.onClick.AddListener(() => OnBoosterButtonClicked?.Invoke(BoosterType.Slow));
         }
+
+        #region EventBus Handlers
+
+        private void OnLevelStart(LevelStartEvent evt)
+        {
+            ShowHUD();
+            UpdateLevel(evt.LevelId);
+            UpdateScore(0);
+            UpdateBoosterCounts(
+                BoosterManager.Instance?.GetCharges(BoosterType.Swap) ?? 0,
+                BoosterManager.Instance?.GetCharges(BoosterType.Bomb) ?? 0,
+                BoosterManager.Instance?.GetCharges(BoosterType.Slow) ?? 0
+            );
+        }
+
+        private void OnLevelComplete(LevelCompleteEvent evt)
+        {
+            ShowGameOver(evt.Score, PlayerPrefs.GetInt("HighScore", 0), CalculateStars(evt.Score));
+        }
+
+        private void OnLevelFail(LevelFailEvent evt)
+        {
+            ShowGameOver(PlayerPrefs.GetInt("CurrentScore", 0), PlayerPrefs.GetInt("HighScore", 0), 0);
+        }
+
+        private void OnBoosterInventoryChanged(BoosterInventoryChangedEvent evt)
+        {
+            UpdateBoosterCounts(
+                BoosterManager.Instance?.GetCharges(BoosterType.Swap) ?? 0,
+                BoosterManager.Instance?.GetCharges(BoosterType.Bomb) ?? 0,
+                BoosterManager.Instance?.GetCharges(BoosterType.Slow) ?? 0
+            );
+        }
+
+        private void OnThemeChanged(ThemeChangedEvent evt)
+        {
+            UpdateThemeDisplay();
+            ColorsManager.Instance.ApplyThemeToUI();
+        }
+
+        private void OnChainResolved(ChainResolvedEvent evt)
+        {
+            // Could update combo display here
+            UpdateCombo(evt.ChainDepth);
+        }
+
+        #endregion
 
         #region Screen Management
 
@@ -171,6 +365,9 @@ namespace ChainReactionConveyor.UI
         {
             if (scoreText != null)
                 scoreText.text = $"Score: {score}";
+            
+            // Also publish to EventBus
+            EventBus.Instance.Publish(new ScoreUpdatedEvent { Score = score });
         }
 
         public void UpdateLevel(int level)
@@ -223,6 +420,14 @@ namespace ChainReactionConveyor.UI
 
         #region Helper Methods
 
+        private int CalculateStars(int score)
+        {
+            if (score >= 1000) return 3;
+            if (score >= 500) return 2;
+            if (score >= 100) return 1;
+            return 0;
+        }
+
         private string GetStarsString(int stars)
         {
             string result = "";
@@ -267,4 +472,13 @@ namespace ChainReactionConveyor.UI
 
         #endregion
     }
+
+    #region Additional Events
+
+    public struct ScoreUpdatedEvent
+    {
+        public int Score;
+    }
+
+    #endregion
 }

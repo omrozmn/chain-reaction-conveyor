@@ -1,8 +1,9 @@
 {
-    "name": "ChainReactionConveyor",
-    "rootNamespace": "ChainReactionConveyor",
+    "name": "ChainReactionConveyor.Tests",
+    "rootNamespace": "ChainReactionConveyor.Tests",
     "references": [
-        "UnityEngine.CoreModule"
+        "UnityEngine.TestRunner",
+        "UnityEditor.TestRunner"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

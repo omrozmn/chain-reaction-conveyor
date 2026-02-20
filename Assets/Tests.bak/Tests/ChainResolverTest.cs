@@ -160,7 +160,7 @@ namespace ChainReactionConveyor.Tests
             _resolver.OnClusterFound += cluster => eventFired = true;
 
             _resolver.PlaceItem(0, 0, 1);
-            _resolver.PlaceItem(1, 0, _resolver.Place 1);
+            _resolver.PlaceItem(1, 0, 1);
            Item(2, 0, 1);
 
             Assert.That(eventFired, Is.True);

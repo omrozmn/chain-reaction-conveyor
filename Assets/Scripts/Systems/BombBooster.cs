@@ -131,8 +131,8 @@ namespace ChainReactionConveyor.Systems
             
             while (elapsed < duration)
             {
-                // Draw debug circle - replace with actual visual in production
-                Debug.DrawWireSphere(new Vector3(position.x, position.y, 0), Vector3.zero, explosionRadius);
+                // Debug visualization (DrawWireSphere not available in Unity)
+                // Debug.DrawWireSphere(new Vector3(position.x, position.y, 0), Vector3.zero, explosionRadius);
                 elapsed += Time.deltaTime;
                 yield return null;
             }

@@ -1,6 +1,7 @@
 using UnityEngine;
 using System;
 using System.Collections.Generic;
+using ChainReactionConveyor.Services;
 
 namespace ChainReactionConveyor.Systems
 {
@@ -25,9 +26,20 @@ namespace ChainReactionConveyor.Systems
     }
 
     /// <summary>
-    /// Manages all boosters in the game - creation, activation, and inventory
+    /// Event data for booster inventory changes
     /// </summary>
-    public class BoosterManager : MonoBehaviour
+    public class BoosterInventoryChangedEvent
+    {
+        public BoosterType Type { get; set; }
+        public int Charges { get; set; }
+        public int MaxCharges { get; set; }
+    }
+
+    /// <summary>
+    /// Manages all boosters in the game - creation, activation, inventory, and refill mechanics
+    /// Uses IComponent pattern for Unity integration
+    /// </summary>
+    public class BoosterManager : MonoBehaviour, IEventSubscriber
     {
         public static BoosterManager Instance { get; private set; }
 
@@ -41,14 +53,42 @@ namespace ChainReactionConveyor.Systems
         [SerializeField] private float slowDuration = 5f;
         [SerializeField] private float slowFactor = 0.3f;
 
+        [Header("Booster Refill Mechanics")]
+        [SerializeField] private bool enableRefillOnLevelComplete = true;
+        [SerializeField] private int refillAmountPerLevel = 1;
+        [SerializeField] private bool enablePeriodicRefill = true;
+        [SerializeField] private float refillIntervalSeconds = 60f;
+        [SerializeField] private int maxChargesSwap = 5;
+        [SerializeField] private int maxChargesBomb = 3;
+        [SerializeField] private int maxChargesSlow = 3;
+
+        #region IEventSubscriber
+
+        public void Subscribe()
+        {
+            EventBus.Instance.Subscribe<LevelCompleteEvent>(OnLevelComplete);
+            EventBus.Instance.Subscribe<LevelStartEvent>(OnLevelStart);
+        }
+
+        public void Unsubscribe()
+        {
+            EventBus.Instance.Clear<LevelCompleteEvent>();
+            EventBus.Instance.Clear<LevelStartEvent>();
+        }
+
+        #endregion
+
         // Active booster instances
         private Dictionary<BoosterType, int> boosterInventory = new Dictionary<BoosterType, int>();
+        private Dictionary<BoosterType, int> maxCharges = new Dictionary<BoosterType, int>();
         private bool isSlowActive = false;
         private float slowTimer = 0f;
+        private float refillTimer = 0f;
 
         // Events
         public event Action<BoosterActivatedEvent> OnBoosterActivated;
         public event Action<BoosterType, int> OnInventoryChanged;
+        public event Action<BoosterType> OnBoosterRefilled;
 
         private void Awake()
         {
@@ -60,6 +100,17 @@ namespace ChainReactionConveyor.Systems
             Instance = this;
             DontDestroyOnLoad(gameObject);
             InitializeInventory();
+            InitializeMaxCharges();
+        }
+
+        private void OnEnable()
+        {
+            Subscribe();
+        }
+
+        private void OnDisable()
+        {
+            Unsubscribe();
         }
 
         private void InitializeInventory()
@@ -69,9 +120,17 @@ namespace ChainReactionConveyor.Systems
             boosterInventory[BoosterType.Slow] = slowCharges;
         }
 
+        private void InitializeMaxCharges()
+        {
+            maxCharges[BoosterType.Swap] = maxChargesSwap;
+            maxCharges[BoosterType.Bomb] = maxChargesBomb;
+            maxCharges[BoosterType.Slow] = maxChargesSlow;
+        }
+
         private void Update()
         {
             HandleSlowEffect();
+            HandlePeriodicRefill();
         }
 
         private void HandleSlowEffect()
@@ -86,6 +145,81 @@ namespace ChainReactionConveyor.Systems
             }
         }
 
+        private void HandlePeriodicRefill()
+        {
+            if (!enablePeriodicRefill) return;
+
+            refillTimer += Time.deltaTime;
+            if (refillTimer >= refillIntervalSeconds)
+            {
+                refillTimer = 0f;
+                RefillAllBoosters();
+            }
+        }
+
+        private void OnLevelComplete(LevelCompleteEvent evt)
+        {
+            if (enableRefillOnLevelComplete)
+            {
+                RefillAllBoosters();
+            }
+        }
+
+        private void OnLevelStart(LevelStartEvent evt)
+        {
+            ResetBoosters();
+        }
+
+        /// <summary>
+        /// Refill all boosters by refillAmountPerLevel
+        /// </summary>
+        public void RefillAllBoosters()
+        {
+            foreach (BoosterType type in Enum.GetValues(typeof(BoosterType)))
+            {
+                RefillBooster(type, refillAmountPerLevel);
+            }
+            Debug.Log("[BoosterManager] All boosters refilled!");
+            
+            // Publish to EventBus
+            EventBus.Instance.Publish(new BoosterInventoryChangedEvent
+            {
+                Type = BoosterType.Swap,
+                Charges = GetCharges(BoosterType.Swap),
+                MaxCharges = GetMaxCharges(BoosterType.Swap)
+            });
+        }
+
+        /// <summary>
+        /// Refill a specific booster type
+        /// </summary>
+        public void RefillBooster(BoosterType type, int amount)
+        {
+            if (!maxCharges.ContainsKey(type)) return;
+
+            int current = boosterInventory.TryGetValue(type, out int c) ? c : 0;
+            int max = maxCharges[type];
+            
+            if (current < max)
+            {
+                int newAmount = Mathf.Min(current + amount, max);
+                boosterInventory[type] = newAmount;
+                
+                OnInventoryChanged?.Invoke(type, newAmount);
+                OnBoosterRefilled?.Invoke(type);
+                
+                // Publish to EventBus
+                EventBus.Instance.Publish(new BoosterInventoryChangedEvent
+                {
+                    Type = type,
+                    Charges = newAmount,
+                    MaxCharges = max
+                });
+                
+                Debug.Log($"[BoosterManager] Refilled {type}: {current} -> {newAmount}");
+            }
+        }
+
         /// <summary>
         /// Get current charges for a booster type
         /// </summary>
@@ -95,11 +229,29 @@ namespace ChainReactionConveyor.Systems
         }
 
         /// <summary>
+        /// Get max charges for a booster type
+        /// </summary>
+        public int GetMaxCharges(BoosterType type)
+        {
+            return maxCharges.TryGetValue(type, out int max) ? max : 0;
+        }
+
+        /// <summary>
         /// Check if a booster is available
         /// </summary>
         public bool HasBooster(BoosterType type)
         {
             return GetCharges(type) > 0;
+        }
+
+        /// <summary>
+        /// Check if booster can be refilled
+        /// </summary>
+        public bool CanRefill(BoosterType type)
+        {
+            int current = GetCharges(type);
+            int max = GetMaxCharges(type);
+            return current < max;
         }
 
         /// <summary>
@@ -117,6 +269,14 @@ namespace ChainReactionConveyor.Systems
             boosterInventory[type]--;
             OnInventoryChanged?.Invoke(type, boosterInventory[type]);
 
+            // Publish to EventBus
+            EventBus.Instance.Publish(new BoosterInventoryChangedEvent
+            {
+                Type = type,
+                Charges = boosterInventory[type],
+                MaxCharges = GetMaxCharges(type)
+            });
+
             // Execute booster effect
             switch (type)
             {
@@ -131,12 +291,18 @@ namespace ChainReactionConveyor.Systems
                     break;
             }
 
-            // Fire event
+            // Fire local event
             OnBoosterActivated?.Invoke(new BoosterActivatedEvent
             {
                 Type = type,
                 Position = position,
                 Charges = boosterInventory[type]
+            });
+
+            // Publish to EventBus
+            EventBus.Instance.Publish(new BoosterUsedEvent
+            {
+                BoosterType = type.ToString()
             });
 
             Debug.Log($"[BoosterManager] Activated {type} at {position}, remaining: {boosterInventory[type]}");
@@ -227,13 +393,22 @@ namespace ChainReactionConveyor.Systems
         {
             if (boosterInventory.ContainsKey(type))
             {
-                boosterInventory[type] += amount;
+                int max = GetMaxCharges(type);
+                boosterInventory[type] = Mathf.Min(boosterInventory[type] + amount, max);
             }
             else
             {
-                boosterInventory[type] = amount;
+                boosterInventory[type] = Mathf.Min(amount, GetMaxCharges(type));
             }
             OnInventoryChanged?.Invoke(type, boosterInventory[type]);
+            
+            // Publish to EventBus
+            EventBus.Instance.Publish(new BoosterInventoryChangedEvent
+            {
+                Type = type,
+                Charges = boosterInventory[type],
+                MaxCharges = GetMaxCharges(type)
+            });
         }
 
         public void ResetBoosters()
@@ -241,13 +416,32 @@ namespace ChainReactionConveyor.Systems
             InitializeInventory();
             isSlowActive = false;
             slowTimer = 0f;
+            refillTimer = 0f;
             Time.timeScale = 1f;
+            
+            // Notify via local events
             OnInventoryChanged?.Invoke(BoosterType.Swap, swapCharges);
             OnInventoryChanged?.Invoke(BoosterType.Bomb, bombCharges);
             OnInventoryChanged?.Invoke(BoosterType.Slow, slowCharges);
+            
+            // Notify via EventBus
+            foreach (BoosterType type in Enum.GetValues(typeof(BoosterType)))
+            {
+                EventBus.Instance.Publish(new BoosterInventoryChangedEvent
+                {
+                    Type = type,
+                    Charges = GetCharges(type),
+                    MaxCharges = GetMaxCharges(type)
+                });
+            }
         }
 
         public float GetSlowRemainingTime() => isSlowActive ? slowTimer : 0f;
         public bool IsSlowActive() => isSlowActive;
+        
+        /// <summary>
+        /// Get time until next refill
+        /// </summary>
+        public float GetTimeUntilRefill() => enablePeriodicRefill ? Mathf.Max(0, refillIntervalSeconds - refillTimer) : 0;
     }
 }

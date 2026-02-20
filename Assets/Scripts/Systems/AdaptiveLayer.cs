@@ -19,7 +19,7 @@ namespace ChainReactionConveyor.Systems
         [Header("Configuration")]
         [SerializeField] private bool enableAdaptiveDifficulty = true;
         [SerializeField] private float adaptationUpdateInterval = 1.0f; // Seconds between updates
-        [SerializeField] private float nearMissPenaltyThreshold = 5f;    // Near-misses per minute that trigger reduction
+        [SerializeField] private float nearMissPenaltyThreshold = 2.5f;    // FIXED: Was 5f, now 2-3 for better sensitivity
         
         [Header("Difficulty Parameters")]
         [SerializeField] private float conveyorSpeedMultiplier = 1.0f;
